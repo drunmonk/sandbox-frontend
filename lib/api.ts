@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://sandbox-project-694581007726.europe-west1.run.app"
+const API_BASE_URL = "https://sandbox-demo-694581007726.europe-west1.run.app"
 
 export type DemoMessage = {
   id: number
@@ -35,10 +35,19 @@ export async function healthCheck(): Promise<ApiResponse<any>> {
 // Fetch all messages
 export async function fetchMessages(): Promise<ApiResponse<DemoMessage[]>> {
   try {
-    const response = await fetch(`${API_BASE_URL}/all-records`)
+    const timestamp = Math.floor(Date.now() / 1000).toString(); // Same as backend
+    const messageToSign = `GET:/all-records:${timestamp}`;
+    const signature = await signMessage(HMAC_SECRET, messageToSign);
+
+    const response = await fetch("https://sandbox-demo-694581007726.europe-west1.run.app/all-records", {
+      method: "GET",
+      headers: {
+        "x-signature": signature,
+        "x-timestamp": timestamp,
+      },
+    });
 
     if (!response.ok) {
-      // If messages endpoint doesn't exist, return mock data for now
       if (response.status === 404) {
         return {
           success: true,
@@ -54,15 +63,14 @@ export async function fetchMessages(): Promise<ApiResponse<DemoMessage[]>> {
               created_at: new Date(Date.now() - 60000).toISOString(),
             },
           ],
-        }
+        };
       }
-      return { success: false, error: `HTTP ${response.status}` }
+      return { success: false, error: `HTTP ${response.status}` };
     }
 
-    const data = await response.json()
-    return { success: true, data }
+    const data = await response.json();
+    return { success: true, data };
   } catch (error) {
-    // Return mock data if API is not available
     return {
       success: true,
       data: [
@@ -77,40 +85,56 @@ export async function fetchMessages(): Promise<ApiResponse<DemoMessage[]>> {
           created_at: new Date(Date.now() - 60000).toISOString(),
         },
       ],
-    }
+    };
   }
 }
 
+
+const HMAC_SECRET = "94114006658fa774dcc24372c5d3032f295aa66af6c77a67afc8b49c3808a220"; // DO NOT DO THIS IN PRODUCTION
+
+
 // Create a new message
+async function signMessage(secret: string, message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const messageBytes = encoder.encode(message);
+  const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, messageBytes);
+
+  const signatureArray = Array.from(new Uint8Array(signatureBuffer));
+  return signatureArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+
 export async function createMessage(messageData: CreateMessageRequest): Promise<ApiResponse<DemoMessage>> {
+  const messageBody = JSON.stringify(messageData);
+  const signature = await signMessage(HMAC_SECRET, messageBody);
+
   try {
-    const response = await fetch(`${API_BASE_URL}/save-records`, {
+    const response = await fetch("https://sandbox-demo-694581007726.europe-west1.run.app/save-query", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-signature": signature,
       },
-      body: JSON.stringify(messageData),
-    })
+      body: messageBody,
+    });
 
     if (!response.ok) {
-      // If messages endpoint doesn't exist, return mock success
-      if (response.status === 404) {
-        return {
-          success: true,
-          data: {
-            id: Math.floor(Math.random() * 1000),
-            message: messageData.message,
-            created_at: new Date().toISOString(),   
-          },
-        }
-      }
-      return { success: false, error: `HTTP ${response.status}` }
+      return { success: false, error: `HTTP ${response.status}` };
     }
 
-    const data = await response.json()
-    return { success: true, data }
+    const data = await response.json();
+    return { success: true, data };
   } catch (error) {
-    // Return mock success if API is not available
     return {
       success: true,
       data: {
@@ -118,6 +142,6 @@ export async function createMessage(messageData: CreateMessageRequest): Promise<
         message: messageData.message,
         created_at: new Date().toISOString(),
       },
-    }
+    };
   }
 }
